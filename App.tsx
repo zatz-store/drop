@@ -5,6 +5,7 @@ import ProductsPage from './pages/ProductsPage';
 import OrdersPage from './pages/OrdersPage';
 import LinkConverterPage from './pages/LinkConverterPage';
 import SettingsPage from './pages/SettingsPage';
+import HowItWorksPage from './pages/HowItWorksPage';
 import LiveSupport from './components/LiveSupport';
 import { Bell, Search, User } from 'lucide-react';
 
@@ -18,7 +19,11 @@ const Header: React.FC<{ title: string }> = ({ title }) => (
     
     <div className="hidden md:block">
        {/* Breadcrumb or Title */}
-       <h1 className="text-xl font-semibold text-slate-800 capitalize">{title === 'converter' ? 'Conversor de Links' : title === 'settings' ? 'Configurações' : title}</h1>
+       <h1 className="text-xl font-semibold text-slate-800 capitalize">
+         {title === 'converter' ? 'Conversor de Links' : 
+          title === 'settings' ? 'Configurações' : 
+          title === 'how-it-works' ? 'Como Funciona' : title}
+       </h1>
     </div>
 
     <div className="flex items-center space-x-4">
@@ -64,6 +69,8 @@ const App: React.FC = () => {
         return <LinkConverterPage />;
       case 'settings':
         return <SettingsPage />;
+      case 'how-it-works':
+        return <HowItWorksPage onNavigate={setActivePage} />;
       case 'plans':
         return (
           <div className="grid md:grid-cols-3 gap-6 pt-10">

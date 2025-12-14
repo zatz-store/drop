@@ -1,17 +1,41 @@
-import React, { useState, useMemo } from 'react';
-import { Plus, PackageOpen, Edit2, Trash2, ExternalLink, Calculator, UploadCloud, Loader2 } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Plus, PackageOpen, Edit2, Trash2, ExternalLink, Calculator, UploadCloud, Loader2, Database } from 'lucide-react';
 import { Product } from '../types';
+import { DatabaseService } from '../services/databaseService';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 
 const ProductsPage: React.FC = () => {
-  // Initialize with empty array
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
 
   // Calculator State
   const [simCost, setSimCost] = useState<string>('');
   const [simSale, setSimSale] = useState<string>('');
-  const [simTax, setSimTax] = useState<string>('14'); // Default Shopee Tax (Standard)
+  const [simTax, setSimTax] = useState<string>('14'); 
   const [simShipping, setSimShipping] = useState<string>('0');
+
+  // Load products on mount
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const loadProducts = async () => {
+    if (!isSupabaseConfigured()) {
+        // If no credentials, we can't fetch. Just stay empty or show message.
+        return;
+    }
+    setLoading(true);
+    try {
+        const data = await DatabaseService.getProducts();
+        setProducts(data);
+    } catch (error) {
+        console.error("Failed to load products", error);
+    } finally {
+        setLoading(false);
+    }
+  };
 
   // Calculator Logic
   const simulationResults = useMemo(() => {
@@ -29,33 +53,34 @@ const ProductsPage: React.FC = () => {
   }, [simCost, simSale, simTax, simShipping]);
 
   // Handle manual price change in the product list
-  const handlePriceChange = (id: string, newPrice: string) => {
-    // If empty, set to 0 to allow clearing
-    if (newPrice === '') {
-        setProducts(prev => prev.map(p => p.id === id ? { ...p, finalPrice: 0 } : p));
-        return;
-    }
-
+  const handlePriceChange = async (id: string, newPrice: string) => {
+    // 1. Optimistic Update in UI
     const price = parseFloat(newPrice);
-    
-    // Validate input: must be a number and non-negative
-    if (isNaN(price) || price < 0) return;
+    if (isNaN(price) || price < 0 && newPrice !== '') return;
 
+    const oldProducts = [...products];
+    
     setProducts(prev => prev.map(p => {
         if (p.id === id) {
-            // Recalculate markup: Markup % = ((FinalPrice - SupplierPrice) / SupplierPrice) * 100
-            const newMarkup = p.supplierPrice > 0 
+             const newMarkup = p.supplierPrice > 0 
                 ? ((price - p.supplierPrice) / p.supplierPrice) * 100 
                 : 0;
-
-            return { 
-                ...p, 
-                finalPrice: price,
-                markup: newMarkup 
-            };
+            return { ...p, finalPrice: price, markup: newMarkup };
         }
         return p;
     }));
+
+    // 2. Debounced API Update (Simplified here: direct call on blur/change would be better, but doing direct for now)
+    // For production, wrap this in a debounce
+    if (newPrice !== '' && isSupabaseConfigured()) {
+         try {
+            await DatabaseService.updateProduct(id, { finalPrice: price });
+         } catch (e) {
+             // Revert on error
+             setProducts(oldProducts);
+             alert("Erro ao salvar preço no banco de dados.");
+         }
+    }
   };
 
   const calculateMargin = (product: Product) => {
@@ -63,50 +88,86 @@ const ProductsPage: React.FC = () => {
       const shipping = parseFloat(simShipping) || 0;
       
       const taxAmount = (product.finalPrice * taxRate) / 100;
-      // Calculation: Sale Price - Supplier Cost - Taxes - Extra Shipping
       return product.finalPrice - product.supplierPrice - taxAmount - shipping;
   };
 
-  // Temporary function to add a demo product for testing since the list is empty
-  const addDemoProduct = () => {
-      const demo: Product = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: 'Fone de Ouvido Bluetooth TWS i12 - Touch',
-        supplierPrice: 18.50,
+  const handleAddDemoProduct = async () => {
+      if (!isSupabaseConfigured()) {
+          alert("Configure as credenciais do Supabase em 'services/supabaseClient.ts' para adicionar produtos.");
+          return;
+      }
+
+      setIsAdding(true);
+      const demoData = {
+        name: 'Smartwatch D20 Pro - Bluetooth Fitness',
+        supplierPrice: 22.50,
         markup: 100,
-        finalPrice: 37.00,
-        stock: 50,
-        supplierName: 'Eletrônicos SP',
-        image: 'https://images.unsplash.com/photo-1572569028738-411a1971d6c9?auto=format&fit=crop&q=80&w=200',
+        finalPrice: 45.00,
+        stock: 100,
+        supplierName: 'Atacado Eletrônicos BR',
+        image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=200',
         category: 'Eletrônicos',
-        // shopeeId intentionally undefined to simulate new product
       };
-      setProducts(prev => [...prev, demo]);
+
+      try {
+          const newProduct = await DatabaseService.addProduct(demoData);
+          if (newProduct) {
+              setProducts(prev => [newProduct, ...prev]);
+          }
+      } catch (error) {
+          alert("Erro ao adicionar produto.");
+      } finally {
+          setIsAdding(false);
+      }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+      if (!confirm("Tem certeza que deseja excluir este produto?")) return;
+      
+      try {
+          await DatabaseService.deleteProduct(id);
+          setProducts(prev => prev.filter(p => p.id !== id));
+      } catch (error) {
+          alert("Erro ao excluir.");
+      }
   };
 
   const handleBatchImport = () => {
     if (products.length === 0) return;
+    if (!isSupabaseConfigured()) return;
 
     setIsImporting(true);
     
-    // Simulate API delay
-    setTimeout(() => {
-        setProducts(prev => prev.map(p => ({
+    // In a real app, this would iterate products and update shopee_id in DB
+    setTimeout(async () => {
+        // Just mocking the UI update for now, but assume we would call updateProduct for each
+        const updated = products.map(p => ({
             ...p,
-            shopeeId: p.shopeeId || 'SHP-' + Math.floor(Math.random() * 100000) // Assign ID if missing
-        })));
+            shopeeId: p.shopeeId || 'SHP-' + Math.floor(Math.random() * 100000)
+        }));
+        setProducts(updated);
         setIsImporting(false);
-        // In a real app, we would show a toast notification here
-        alert('Todos os produtos foram sincronizados com a Shopee com sucesso!');
+        alert('Sincronização com Shopee simulada com sucesso!');
     }, 2000);
   };
+
+  if (loading) {
+      return <div className="flex h-64 items-center justify-center"><Loader2 className="animate-spin text-orange-500" size={32} /></div>;
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div>
                 <h2 className="text-2xl font-bold text-slate-800">Meus Produtos</h2>
-                <p className="text-sm text-slate-500">Gerencie seu catálogo e preços</p>
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <span>Gerencie seu catálogo</span>
+                    {!isSupabaseConfigured() && (
+                        <span className="text-red-500 bg-red-50 px-2 py-0.5 rounded text-xs border border-red-100 flex items-center gap-1">
+                            <Database size={10} /> Banco de dados não configurado
+                        </span>
+                    )}
+                </div>
             </div>
             <div className="flex gap-3">
                 {products.length > 0 && (
@@ -120,10 +181,11 @@ const ProductsPage: React.FC = () => {
                     </button>
                 )}
                 <button 
-                    onClick={addDemoProduct}
-                    className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 font-medium flex items-center gap-2 shadow-sm transition-all"
+                    onClick={handleAddDemoProduct}
+                    disabled={isAdding}
+                    className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 font-medium flex items-center gap-2 shadow-sm transition-all disabled:opacity-70"
                 >
-                    <Plus size={18} />
+                    {isAdding ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
                     Adicionar Produto
                 </button>
             </div>
@@ -232,7 +294,7 @@ const ProductsPage: React.FC = () => {
                             <p className="text-sm text-slate-500 mb-2">{product.supplierName}</p>
                             <div className="flex justify-center md:justify-start gap-4 text-xs text-slate-400 font-medium">
                                  <span className="bg-slate-50 px-2 py-1 rounded">Estoque: {product.stock}</span>
-                                 <span className="bg-slate-50 px-2 py-1 rounded">Custo: R$ {product.supplierPrice.toFixed(2)}</span>
+                                 <span className="bg-slate-50 px-2 py-1 rounded">Custo: R$ {product.supplierPrice?.toFixed(2) || '0.00'}</span>
                             </div>
                         </div>
 
@@ -263,7 +325,11 @@ const ProductsPage: React.FC = () => {
                             <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar Detalhes">
                                 <Edit2 size={18} />
                             </button>
-                             <button className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Excluir">
+                             <button 
+                                onClick={() => handleDeleteProduct(product.id)}
+                                className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" 
+                                title="Excluir"
+                             >
                                 <Trash2 size={18} />
                             </button>
                         </div>
@@ -274,8 +340,14 @@ const ProductsPage: React.FC = () => {
                     <div className="bg-orange-50 p-6 rounded-full mb-6">
                         <PackageOpen size={48} className="text-orange-500" />
                     </div>
-                    <h3 className="text-xl font-bold text-slate-800 mb-2">Nenhum produto encontrado</h3>
-                    <p className="text-slate-500 max-w-md">Importe produtos usando o conversor de links ou clique em "Adicionar Produto" para testar.</p>
+                    <h3 className="text-xl font-bold text-slate-800 mb-2">
+                        {isSupabaseConfigured() ? 'Nenhum produto encontrado' : 'Banco de Dados não conectado'}
+                    </h3>
+                    <p className="text-slate-500 max-w-md">
+                        {isSupabaseConfigured() 
+                            ? 'Clique em "Adicionar Produto" para criar seu primeiro item no banco de dados.' 
+                            : 'Configure o arquivo services/supabaseClient.ts com suas chaves para ver seus produtos.'}
+                    </p>
                 </div>
             )}
         </div>

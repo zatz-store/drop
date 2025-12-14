@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, ShoppingBag, Package, Link2, Settings, LogOut, Zap } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, Package, Link2, Settings, LogOut, Zap, BookOpen } from 'lucide-react';
 
 interface SidebarProps {
   activePage: string;
@@ -13,6 +13,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activePage, setActivePage }) => {
     { id: 'products', label: 'Produtos', icon: ShoppingBag },
     { id: 'converter', label: 'Conversor', icon: Link2 },
     { id: 'plans', label: 'Planos', icon: Zap },
+    { id: 'how-it-works', label: 'Como Funciona', icon: BookOpen },
     { id: 'settings', label: 'Configurações', icon: Settings },
   ];
 
